@@ -3,7 +3,7 @@ import { Trophy, Target, Medal, Zap, Crosshair, Heart } from 'lucide-react';
 import type { GameSnapshot, Player, PlayerRank, AttendanceStatus } from '@/lib/types';
 import { playerById } from '@/lib/selectors';
 import { computePlayerStats, rankFromXp, RANK_COLORS } from '@/lib/xp';
-import { useLanguage } from '@/lib/LanguageContext';
+import { useLang } from '@/lib/LanguageContext';
 import { t } from '@/lib/i18n';
 
 interface Props {
@@ -83,7 +83,7 @@ const RANK_COLORS_LOCAL: Record<PlayerRank, string> = {
 
 export function Leaderboard({ snapshot }: Props) {
   const [tab, setTab] = useState<Tab>('topTagger');
-  const { lang } = useLanguage();
+  const { lang } = useLang();
 
   const todayDate = snapshot.today?.date ?? new Date().toISOString().slice(0, 10);
   const attendanceMap = new Map(

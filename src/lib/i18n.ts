@@ -73,7 +73,14 @@ type TranslationKey =
   | 'attendance.markPresent' | 'attendance.markAbsent' | 'attendance.markLeftEarly' | 'attendance.markAllPresent'
   | 'attendance.bulkUpdate' | 'attendance.selectPlayers' | 'attendance.confirmBulk' | 'attendance.leftAt'
   | 'attendance.editTime' | 'attendance.noPlayers' | 'attendance.allMarked' | 'attendance.status'
-  | 'attendance.presentShort' | 'attendance.absentShort' | 'attendance.leftEarlyShort' | 'attendance.unknownShort';
+  | 'attendance.presentShort' | 'attendance.absentShort' | 'attendance.leftEarlyShort' | 'attendance.unknownShort'
+  | 'admin.manualTags' | 'admin.manualTagDesc' | 'admin.tagger' | 'admin.taggedPlayer' | 'admin.tagTime' | 'admin.tagNote'
+  | 'admin.confirmManualTag' | 'admin.normalXp' | 'admin.latePenalty' | 'admin.xpAwarded' | 'admin.duplicateTagWarn'
+  | 'admin.reviveCreator' | 'admin.reviveCreatorDesc' | 'admin.eliminatedPlayer' | 'admin.opponent' | 'admin.winner'
+  | 'admin.reviveNotes' | 'admin.confirmRevive' | 'admin.reviveWarning'
+  | 'graveyard.eliminatedBy' | 'graveyard.eliminationReason' | 'graveyard.reviveAdminOnly'
+  | 'graveyard.reviveHistory' | 'graveyard.noHistory'
+  | 'untouched.bonusTitle' | 'untouched.bonusDesc' | 'untouched.bonusAwarded';
 
 const translations: Record<Language, Record<TranslationKey, string>> = {
   en: {
@@ -303,6 +310,33 @@ const translations: Record<Language, Record<TranslationKey, string>> = {
     'attendance.absentShort': 'Absent',
     'attendance.leftEarlyShort': 'Left',
     'attendance.unknownShort': '—',
+    'admin.manualTags': 'Manual Tags',
+    'admin.manualTagDesc': 'Record a tag that happened but was not registered.',
+    'admin.tagger': 'Tagger',
+    'admin.taggedPlayer': 'Tagged Player',
+    'admin.tagTime': 'Approximate Time',
+    'admin.tagNote': 'Reason / Note',
+    'admin.confirmManualTag': 'Confirm Manual Tag',
+    'admin.normalXp': 'Normal XP',
+    'admin.latePenalty': 'Late Registration Penalty',
+    'admin.xpAwarded': 'XP Awarded',
+    'admin.duplicateTagWarn': 'A similar tag may already exist. Proceed anyway?',
+    'admin.reviveCreator': 'Revive Duel',
+    'admin.reviveCreatorDesc': 'Record the result of a revive duel that happened at school.',
+    'admin.eliminatedPlayer': 'Eliminated Player',
+    'admin.opponent': 'Opponent',
+    'admin.winner': 'Winner',
+    'admin.reviveNotes': 'Notes (optional)',
+    'admin.confirmRevive': 'Confirm Revive Result',
+    'admin.reviveWarning': 'will return to the game.',
+    'graveyard.eliminatedBy': 'Eliminated by',
+    'graveyard.eliminationReason': 'Reason',
+    'graveyard.reviveAdminOnly': 'Revives are managed by the admin.',
+    'graveyard.reviveHistory': 'Revive History',
+    'graveyard.noHistory': 'No revive attempts.',
+    'untouched.bonusTitle': 'Untouched Bonus',
+    'untouched.bonusDesc': 'Survived the entire day without being tagged!',
+    'untouched.bonusAwarded': '+50 XP',
   },
   es: {
     'nav.home': 'Inicio',
@@ -531,6 +565,33 @@ const translations: Record<Language, Record<TranslationKey, string>> = {
     'attendance.absentShort': 'Ausente',
     'attendance.leftEarlyShort': 'Se fue',
     'attendance.unknownShort': '—',
+    'admin.manualTags': 'Tags Manuales',
+    'admin.manualTagDesc': 'Registrar un tag que ocurrió pero no fue registrado.',
+    'admin.tagger': 'Jugador que tageó',
+    'admin.taggedPlayer': 'Jugador tageado',
+    'admin.tagTime': 'Hora aproximada',
+    'admin.tagNote': 'Razón / Nota',
+    'admin.confirmManualTag': 'Confirmar Tag Manual',
+    'admin.normalXp': 'XP normal',
+    'admin.latePenalty': 'Penalización por registro tardío',
+    'admin.xpAwarded': 'XP otorgada',
+    'admin.duplicateTagWarn': 'Un tag similar ya podría existir. ¿Continuar?',
+    'admin.reviveCreator': 'Duelo de Revive',
+    'admin.reviveCreatorDesc': 'Registrar el resultado de un duelo de revive que ocurrió en la escuela.',
+    'admin.eliminatedPlayer': 'Jugador Eliminado',
+    'admin.opponent': 'Oponente',
+    'admin.winner': 'Ganador',
+    'admin.reviveNotes': 'Notas (opcional)',
+    'admin.confirmRevive': 'Confirmar Resultado de Revive',
+    'admin.reviveWarning': 'volverá al juego.',
+    'graveyard.eliminatedBy': 'Eliminado por',
+    'graveyard.eliminationReason': 'Razón',
+    'graveyard.reviveAdminOnly': 'Los revives son manejados por el admin.',
+    'graveyard.reviveHistory': 'Historial de Revives',
+    'graveyard.noHistory': 'No hay intentos de revive.',
+    'untouched.bonusTitle': 'Bonus sin ser tageado',
+    'untouched.bonusDesc': '¡Terminó todo el día sin ser tageado!',
+    'untouched.bonusAwarded': '+50 XP',
   },
 };
 

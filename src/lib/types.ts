@@ -23,6 +23,8 @@ export interface Player {
   status: PlayerStatus;
   eliminated_day: number | null;
   eliminated_at: string | null;
+  eliminated_by: string | null;
+  elimination_reason: string | null;
   claimed_device_id: string | null;
   sort_order: number;
   created_at: string;
@@ -64,6 +66,11 @@ export interface Tag {
   status: TagStatus;
   created_at: string;
   confirmed_at: string | null;
+  admin_recorded: boolean | null;
+  admin_player_id: string | null;
+  actual_tag_time: string | null;
+  late_penalty: boolean | null;
+  manual_note: string | null;
 }
 
 export interface Announcement {
@@ -130,6 +137,8 @@ export interface Revive {
   requestedAt: string;
   acceptedAt: string | null;
   completedAt: string | null;
+  adminPlayerId: string | null;
+  notes: string | null;
 }
 
 export type EventType = 'MOST_WANTED' | 'DOUBLE_BOUNTY' | 'SURVIVOR' | 'KING_OF_THE_DAY' | 'RIVALRY';

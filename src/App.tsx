@@ -77,6 +77,8 @@ function AppInner() {
   }, [snapshot]);
 
   const isAdmin = !!adminPin;
+  const CHUCHO_PLAYER_ID = '386bd983-51a1-4853-ac83-43584c228982';
+  const isChucho = me?.id === CHUCHO_PLAYER_ID;
 
   const claim = useCallback(
     async (player: Player) => {
@@ -177,7 +179,7 @@ function AppInner() {
         unreadUpdates={unreadUpdates}
         unreadChat={unreadChat}
         hasActiveEvent={hasActiveEvent}
-        isAdmin={isAdmin}
+        isAdmin={isAdmin && isChucho}
         onOpenAdmin={() => setShowAdmin(true)}
         onLogOut={handleLogOut}
       />

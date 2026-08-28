@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+// attendance system
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -449,6 +450,56 @@ async function awardSurvivalXp(competition: any, game: any) {
   }
 }
 
+async function awardUntaggedBonus(competition: any, game: any) {
+  // +50 XP to eligible players who participated the full game day without being tagged
+  const { data: players } = await supabase.from("players").select("*");
+  const { data: dayTags } = await supabase.from("tags").select("*").eq("daily_game_id", game.id).eq("status", "confirmed");
+  const { data: attendance } = await supabase.from("attendance").select("*").eq("date", game.date);
+
+  // Build set of tagged player IDs for this day
+  const taggedSet = new Set<string>((dayTags ?? []).map((t: any) => t.tagged_player_id));
+  const attendanceMap = new Map<string, any>((attendance ?? []).map((a: any) => [a.player_id, a]));
+
+  for (const p of players ?? []) {
+    // Must be active (not eliminated)
+    if (p.status !== "active") continue;
+
+    // Must be marked present
+    const att = attendanceMap.get(p.id);
+    if (!att || att.status !== "present") continue;
+
+    // Must not have been tagged today
+    if (taggedSet.has(p.id)) continue;
+
+    // Must not have been IT at end of day (the eliminated player)
+    if (game.eliminated_player_id === p.id) continue;
+
+    // Idempotent: check if bonus already awarded for this date
+    const { data: existing } = await supabase.from("player_xp_events")
+      .select("id").eq("player_id", p.id).eq("untagged_bonus_date", game.date).maybeSingle();
+    if (existing) continue;
+
+    // Award +50 XP
+    const { error: xpErr } = await supabase.from("player_xp_events").insert({
+      player_id: p.id,
+      event_type: "UNTAGGED_BONUS",
+      xp_amount: 50,
+      description: "Untouched Bonus — survived the entire day without being tagged",
+      untagged_bonus_date: game.date,
+    });
+
+    if (!xpErr) {
+      const { data: pData } = await supabase.from("players").select("xp").eq("id", p.id).maybeSingle();
+      if (pData) {
+        const newXp = (pData.xp ?? 0) + 50;
+        await supabase.from("players").update({ xp: newXp, rank: rankFromXp(newXp) }).eq("id", p.id);
+      }
+      await postActivity("UNTAGGED_BONUS", `${p.name} survived the entire day without being tagged! +50 XP`, p.id, p.name);
+      await checkAndUnlockTitles(p.id);
+    }
+  }
+}
+
 async function generateDailyRecap(competition: any, game: any) {
   // Top tagger
   const { data: dayTags } = await supabase.from("tags").select("*").eq("daily_game_id", game.id).eq("status", "confirmed");
@@ -608,7 +659,7 @@ async function endDay(competition: any, game: any) {
   if (eliminatedId) {
     await supabase
       .from("players")
-      .update({ status: "eliminated", eliminated_day: game.day_number, eliminated_at: now.toISOString() })
+      .update({ status: "eliminated", eliminated_day: game.day_number, eliminated_at: now.toISOString(), eliminated_by: null, elimination_reason: "End of day — was IT" })
       .eq("id", eliminatedId);
   }
 
@@ -631,6 +682,9 @@ async function endDay(competition: any, game: any) {
 
   // Award survival XP to remaining active players
   await awardSurvivalXp(competition, game);
+
+  // Award untagged bonus: +50 XP to eligible players who were never tagged today
+  await awardUntaggedBonus(competition, game);
 
   // Generate daily recap
   await generateDailyRecap(competition, game);
@@ -812,6 +866,8 @@ async function getSnapshot() {
       requestedAt: r.requested_at,
       acceptedAt: r.accepted_at,
       completedAt: r.completed_at,
+      adminPlayerId: r.admin_player_id ?? null,
+      notes: r.notes ?? null,
     })),
     gameEvents: (gameEventsRaw ?? []).map((e: any) => ({
       id: e.id,
@@ -1034,6 +1090,13 @@ async function requireAdmin(body: any) {
   const { data: competition } = await supabase.from("competition").select("*").limit(1).maybeSingle();
   if (!competition) return null;
   if (body.pin !== competition.admin_pin) return null;
+  // Chucho is the only admin — verify the request device matches Chucho's claimed device.
+  const adminPlayerId = competition.admin_player_id;
+  if (adminPlayerId) {
+    const { data: adminPlayer } = await supabase.from("players").select("claimed_device_id").eq("id", adminPlayerId).maybeSingle();
+    if (!adminPlayer || !adminPlayer.claimed_device_id) return null;
+    if (body.device_id !== adminPlayer.claimed_device_id) return null;
+  }
   return competition;
 }
 
@@ -1311,19 +1374,22 @@ async function handleAdmin(action: string, body: any) {
         ? revive.opponent_player_id
         : revive.challenger_player_id;
 
-      // Revive the winner
+      // Revive the winner — clear current elimination but preserve history via revives table
       await supabase.from("players").update({
         status: "active",
         eliminated_day: null,
         eliminated_at: null,
+        eliminated_by: null,
+        elimination_reason: null,
       }).eq("id", winner_player_id);
 
-      // Mark revive completed
+      // Mark revive completed with admin info
       await supabase.from("revives").update({
         status: "completed",
         winner_player_id,
         loser_player_id: loserId,
         completed_at: now.toISOString(),
+        admin_player_id: competition.admin_player_id ?? null,
       }).eq("id", revive_id);
 
       await announce(competition.id, latest?.id ?? null, "revive", "REVIVE!",
@@ -1524,6 +1590,24 @@ async function handleAdmin(action: string, body: any) {
           new_left_at: newLeftAt,
           changed_by: "admin",
         });
+
+        // If player is marked absent or left_early, remove from active special event target pools
+        if (u.status === "absent" || u.status === "left_early") {
+          const { data: activeSpecials } = await supabase.from("special_events").select("*").eq("status", "active");
+          for (const se of activeSpecials ?? []) {
+            if (se.target_player_ids?.includes(u.player_id)) {
+              const newTargets = se.target_player_ids.filter((id: string) => id !== u.player_id);
+              const taggedIds = se.tagged_player_ids ?? [];
+              await supabase.from("special_events").update({
+                target_player_ids: newTargets,
+              }).eq("id", se.id);
+              if (taggedIds.length >= newTargets.length && newTargets.length > 0) {
+                await supabase.from("special_events").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", se.id);
+                await announce(competition.id, latest?.id ?? null, "event", "2 VS EVERYBODY COMPLETED!", "All remaining targets have been tagged!");
+              }
+            }
+          }
+        }
       }
       return json({ ok: true });
     }
@@ -1555,6 +1639,146 @@ async function handleAdmin(action: string, body: any) {
         }
       }
       return json({ ok: true });
+    }
+    case "admin_create_revive": {
+      const { eliminated_player_id, opponent_player_id, winner_player_id, notes } = body;
+      if (!eliminated_player_id || !opponent_player_id || !winner_player_id) return json({ error: "missing_data" }, 400);
+      if (eliminated_player_id === opponent_player_id) return json({ error: "cannot_challenge_self" }, 400);
+
+      // Winner must be one of the two participants
+      if (winner_player_id !== eliminated_player_id && winner_player_id !== opponent_player_id) {
+        return json({ error: "invalid_winner" }, 400);
+      }
+
+      // Verify the eliminated player is actually eliminated
+      const elimPlayer = (players ?? []).find((p) => p.id === eliminated_player_id);
+      if (!elimPlayer) return json({ error: "player_not_found" }, 404);
+      if (elimPlayer.status !== "eliminated") return json({ error: "not_eliminated" }, 400);
+
+      const loserId = winner_player_id === eliminated_player_id ? opponent_player_id : eliminated_player_id;
+
+      // Insert the revive record as completed
+      const { data: reviveRecord } = await supabase.from("revives").insert({
+        challenger_player_id: eliminated_player_id,
+        opponent_player_id,
+        grade: elimPlayer.grade ?? "Freshman",
+        status: "completed",
+        winner_player_id,
+        loser_player_id: loserId,
+        requested_at: now.toISOString(),
+        completed_at: now.toISOString(),
+        admin_player_id: competition.admin_player_id ?? null,
+        notes: notes ?? null,
+      }).select().maybeSingle();
+
+      // If the eliminated player won, revive them
+      if (winner_player_id === eliminated_player_id) {
+        await supabase.from("players").update({
+          status: "active",
+          eliminated_day: null,
+          eliminated_at: null,
+          eliminated_by: null,
+          elimination_reason: null,
+        }).eq("id", eliminated_player_id);
+
+        await announce(competition.id, latest?.id ?? null, "revive", "REVIVE!",
+          `${nameOf(eliminated_player_id)} won a revive against ${nameOf(opponent_player_id)} and is back in the game!`);
+
+        // Award +40 XP for revive win
+        if (reviveRecord) {
+          const { error: xpErr } = await supabase.from("player_xp_events").insert({
+            player_id: winner_player_id,
+            event_type: "REVIVE_WIN",
+            xp_amount: 40,
+            description: `Revive win vs ${nameOf(loserId)}`,
+            related_tag_id: reviveRecord.id,
+          });
+          if (!xpErr) {
+            const { data: p } = await supabase.from("players").select("xp").eq("id", winner_player_id).maybeSingle();
+            if (p) {
+              const newXp = (p.xp ?? 0) + 40;
+              await supabase.from("players").update({ xp: newXp, rank: rankFromXp(newXp) }).eq("id", winner_player_id);
+            }
+          }
+        }
+        await checkAndUnlockTitles(winner_player_id);
+      } else {
+        // Opponent won — eliminated player stays eliminated
+        await announce(competition.id, latest?.id ?? null, "revive", "REVIVE FAILED",
+          `${nameOf(eliminated_player_id)} lost a revive against ${nameOf(opponent_player_id)} and remains eliminated.`);
+      }
+
+      return json({ ok: true });
+    }
+    case "admin_manual_tag": {
+      const { tagger_id, tagged_player_id, tag_time, note } = body;
+      if (!tagger_id || !tagged_player_id) return json({ error: "missing_data" }, 400);
+      if (tagger_id === tagged_player_id) return json({ error: "cannot_tag_self" }, 400);
+
+      const tagger = (players ?? []).find((p) => p.id === tagger_id);
+      const tagged = (players ?? []).find((p) => p.id === tagged_player_id);
+      if (!tagger || !tagged) return json({ error: "player_not_found" }, 404);
+      if (tagger.status !== "active") return json({ error: "tagger_not_active" }, 400);
+      if (tagged.status !== "active") return json({ error: "tagged_not_active" }, 400);
+
+      // Determine which daily game to use
+      let dailyGameId: string | null = null;
+      const actualTime = tag_time ? new Date(tag_time) : now;
+      const tagDateStr = tzParts(actualTime, tz).dateStr;
+
+      // Find the daily game matching the tag date, or fall back to latest
+      const { data: matchingGame } = await supabase
+        .from("daily_games").select("*").eq("competition_id", competition.id)
+        .eq("date", tagDateStr).order("day_number", { ascending: false }).limit(1).maybeSingle();
+      if (matchingGame) {
+        dailyGameId = matchingGame.id;
+      } else if (latest) {
+        dailyGameId = latest.id;
+      }
+      if (!dailyGameId) return json({ error: "no_game_for_date" }, 400);
+
+      // Duplicate tag protection: check if same tagger→tagged already exists for this day
+      const { data: existingTags } = await supabase.from("tags")
+        .select("*").eq("daily_game_id", dailyGameId)
+        .eq("tagger_id", tagger_id).eq("tagged_player_id", tagged_player_id)
+        .eq("status", "confirmed");
+      if (existingTags && existingTags.length > 0) {
+        return json({ error: "duplicate_tag", conflict: true }, 409);
+      }
+
+      // Insert the tag with admin_recorded metadata
+      const { data: manualTag } = await supabase.from("tags").insert({
+        daily_game_id: dailyGameId,
+        tag_slot: 1,
+        tagger_id,
+        tagged_player_id,
+        status: "confirmed",
+        confirmed_at: actualTime.toISOString(),
+        admin_recorded: true,
+        admin_player_id: competition.admin_player_id ?? null,
+        actual_tag_time: actualTime.toISOString(),
+        late_penalty: true,
+        manual_note: note ?? null,
+      }).select().maybeSingle();
+
+      if (!manualTag) return json({ error: "tag_insert_failed" }, 500);
+
+      // Award 50% XP (normal tag = 10 XP, so manual = 5 XP)
+      const normalTagXp = 10;
+      const manualXp = Math.round(normalTagXp * 0.5);
+      await awardXp(tagger_id, manualXp, "TAG_LATE", `Admin-recorded tag (50% XP): ${tagger.name} tagged ${tagged.name}`, manualTag.id);
+
+      // Post activity feed entry
+      await postActivity("ADMIN_TAG", `${tagger.name} tagged ${tagged.name} (admin-recorded, 50% XP)`, tagger_id, tagger.name, manualTag.id);
+      await postSystemChat(competition.id, `${tagger.name} tagged ${tagged.name} (admin-recorded tag)`);
+
+      // Resolve events that may have been active at the actual tag time
+      await resolveEventOnTag(competition, { id: dailyGameId, ...matchingGame } ?? latest, tagger_id, tagged_player_id, manualTag.id);
+
+      // Check title unlocks
+      await checkAndUnlockTitles(tagger_id);
+
+      return json({ ok: true, tag: manualTag });
     }
     default:
       return json({ error: "unknown_admin_action" }, 400);
@@ -1786,11 +2010,11 @@ Deno.serve(async (req: Request) => {
       case "request_join":
         return await handleRequestJoin(body);
       case "request_revive":
-        return await handleRequestRevive(body);
+        return json({ error: "revives_are_admin_only" }, 403);
       case "accept_revive":
-        return await handleAcceptRevive(body);
+        return json({ error: "revives_are_admin_only" }, 403);
       case "decline_revive":
-        return await handleDeclineRevive(body);
+        return json({ error: "revives_are_admin_only" }, 403);
       case "send_chat":
         return await handleSendChat(body);
       case "mark_update_viewed":
@@ -1807,3 +2031,5 @@ Deno.serve(async (req: Request) => {
     return json({ error: String(err instanceof Error ? err.message : err) }, 500);
   }
 });
+ 
+ 

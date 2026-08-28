@@ -28,10 +28,6 @@ export const api = {
   admin: (adminAction: string, pin: string, payload: Record<string, unknown> = {}) =>
     call(`admin_${adminAction}`, { pin, ...payload }),
   requestJoin: (name: string, grade: string) => call('request_join', { name, grade }),
-  requestRevive: (challenger_player_id: string, opponent_player_id: string) =>
-    call('request_revive', { challenger_player_id, opponent_player_id }),
-  acceptRevive: (revive_id: string, player_id: string) => call('accept_revive', { revive_id, player_id }),
-  declineRevive: (revive_id: string, player_id: string) => call('decline_revive', { revive_id, player_id }),
   saveSchedule: (player_id: string, schedule: PlayerSchedule) =>
     call('save_schedule', { player_id, schedule }),
   equipTitle: (player_id: string, title: string | null) =>
@@ -51,4 +47,14 @@ export const attendanceApi = {
     api.admin('bulk_attendance', pin, { updates }),
   markAllPresent: (pin: string) =>
     api.admin('mark_all_present', pin),
+};
+
+export const adminReviveApi = {
+  createRevive: (pin: string, eliminated_player_id: string, opponent_player_id: string, winner_player_id: string, notes?: string) =>
+    api.admin('create_revive', pin, { eliminated_player_id, opponent_player_id, winner_player_id, notes }),
+};
+
+export const manualTagApi = {
+  create: (pin: string, tagger_id: string, tagged_player_id: string, tag_time?: string, note?: string) =>
+    api.admin('manual_tag', pin, { tagger_id, tagged_player_id, tag_time, note }),
 };

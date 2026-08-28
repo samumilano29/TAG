@@ -27,10 +27,12 @@ import {
   CalendarCheck,
   Clock,
   Users,
+  Hand,
 } from 'lucide-react';
 import type { GameSnapshot, Player, PlayerRank, PlayerGrade, PlayerJoinRequest, Revive, AttendanceStatus } from '@/lib/types';
-import { api } from '@/lib/api';
+import { api, adminReviveApi, manualTagApi } from '@/lib/api';
 import { playerById } from '@/lib/selectors';
+import { useLang } from '@/lib/LanguageContext';
 
 const RANKS: PlayerRank[] = ['Unranked', 'Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond', 'Champion', 'Legend'];
 const GRADES: PlayerGrade[] = ['Freshman', 'Sophomore', 'Junior', 'Senior'];
@@ -303,6 +305,26 @@ export function Admin({ snapshot, onClose, onDone, onPinEntered }: Props) {
           </Section>
         );
       })()}
+
+      {/* Revive Duel Creator */}
+      <Section title="Revive Duel">
+        <ReviveDuelCreator
+          snapshot={snapshot}
+          pin={pin}
+          busy={!!busy}
+          onDone={onDone}
+        />
+      </Section>
+
+      {/* Manual Tags */}
+      <Section title="Manual Tags">
+        <ManualTagCreator
+          snapshot={snapshot}
+          pin={pin}
+          busy={!!busy}
+          onDone={onDone}
+        />
+      </Section>
 
       {/* Player Management */}
       <Section title="Player Management">
@@ -1473,6 +1495,292 @@ function EditTimeModal({ target, onClose, onSave, busy }: {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---- Revive Duel Creator ----
+
+function ReviveDuelCreator({
+  snapshot, pin, busy, onDone,
+}: {
+  snapshot: GameSnapshot;
+  pin: string;
+  busy: boolean;
+  onDone: () => void;
+}) {
+  const { t } = useLang();
+  const [eliminatedId, setEliminatedId] = useState('');
+  const [opponentId, setOpponentId] = useState('');
+  const [winnerId, setWinnerId] = useState('');
+  const [notes, setNotes] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [submitBusy, setSubmitBusy] = useState(false);
+
+  const eliminatedPlayers = snapshot.players.filter((p) => p.status === 'eliminated');
+  const allPlayers = snapshot.players;
+
+  const handleSubmit = async () => {
+    setSubmitBusy(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await adminReviveApi.createRevive(pin, eliminatedId, opponentId, winnerId, notes || undefined);
+      setSuccess('Revive duel recorded!');
+      setEliminatedId('');
+      setOpponentId('');
+      setWinnerId('');
+      setNotes('');
+      setConfirming(false);
+      onDone();
+    } catch (e: any) {
+      setError(
+        e?.code === 'duplicate_tag'
+          ? t('admin.duplicateTagWarn')
+          : e?.code === 'not_eliminated'
+            ? 'Player is not eliminated.'
+            : 'Could not record revive. Try again.',
+      );
+    } finally {
+      setSubmitBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-ink-500">{t('admin.reviveCreatorDesc')}</p>
+
+      <div>
+        <label className="text-xs font-semibold uppercase tracking-wider text-ink-400">{t('admin.eliminatedPlayer')}</label>
+        <select value={eliminatedId} onChange={(e) => { setEliminatedId(e.target.value); setWinnerId(''); }}
+          className="mt-1.5 w-full rounded-lg border border-ink-600 bg-ink-900 px-3 py-2.5 text-sm text-white outline-none focus:border-blue-500">
+          <option value="">— Select —</option>
+          {eliminatedPlayers.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label className="text-xs font-semibold uppercase tracking-wider text-ink-400">{t('admin.opponent')}</label>
+        <select value={opponentId} onChange={(e) => { setOpponentId(e.target.value); setWinnerId(''); }}
+          className="mt-1.5 w-full rounded-lg border border-ink-600 bg-ink-900 px-3 py-2.5 text-sm text-white outline-none focus:border-blue-500">
+          <option value="">— Select —</option>
+          {allPlayers.filter((p) => p.id !== eliminatedId).map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+      </div>
+
+      {eliminatedId && opponentId && (
+        <div>
+          <label className="text-xs font-semibold uppercase tracking-wider text-ink-400">{t('admin.winner')}</label>
+          <div className="mt-1.5 grid grid-cols-2 gap-2">
+            <button onClick={() => setWinnerId(eliminatedId)}
+              className={`rounded-xl border py-2.5 text-sm font-bold transition active:scale-95 ${
+                winnerId === eliminatedId ? 'border-safe bg-safe/20 text-safe-bright' : 'border-ink-600 bg-ink-800 text-ink-300'
+              }`}>
+              {playerById(snapshot, eliminatedId)?.name}
+            </button>
+            <button onClick={() => setWinnerId(opponentId)}
+              className={`rounded-xl border py-2.5 text-sm font-bold transition active:scale-95 ${
+                winnerId === opponentId ? 'border-safe bg-safe/20 text-safe-bright' : 'border-ink-600 bg-ink-800 text-ink-300'
+              }`}>
+              {playerById(snapshot, opponentId)?.name}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div>
+        <label className="text-xs font-semibold uppercase tracking-wider text-ink-400">{t('admin.reviveNotes')}</label>
+        <input value={notes} onChange={(e) => setNotes(e.target.value)}
+          placeholder={t('admin.reviveNotes')}
+          className="mt-1.5 w-full rounded-lg border border-ink-600 bg-ink-900 px-3 py-2 text-sm text-white outline-none focus:border-blue-500" />
+      </div>
+
+      {error && <p className="text-sm text-it-bright">{error}</p>}
+      {success && <p className="text-sm text-safe-bright">{success}</p>}
+
+      {confirming ? (
+        <div className="rounded-xl border-2 border-safe/50 bg-safe/10 p-4 text-center">
+          <p className="text-sm text-white">
+            <span className="font-bold text-safe-bright">{playerById(snapshot, winnerId)?.name}</span> {t('admin.reviveWarning')}
+          </p>
+          <div className="mt-4 flex gap-3">
+            <button onClick={() => setConfirming(false)} disabled={submitBusy}
+              className="flex-1 rounded-xl border border-ink-600 py-2.5 font-semibold text-ink-200 active:scale-95 disabled:opacity-50">
+              {t('common.cancel')}
+            </button>
+            <button onClick={handleSubmit} disabled={submitBusy}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-safe py-2.5 font-bold text-white active:scale-95 disabled:opacity-50">
+              {submitBusy ? 'Saving…' : t('common.confirm')}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => setConfirming(true)}
+          disabled={busy || !eliminatedId || !opponentId || !winnerId}
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-500 py-2.5 text-sm font-bold text-white active:scale-95 disabled:opacity-50">
+          <Swords className="h-4 w-4" /> {t('admin.confirmRevive')}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ---- Manual Tag Creator ----
+
+function ManualTagCreator({
+  snapshot, pin, busy, onDone,
+}: {
+  snapshot: GameSnapshot;
+  pin: string;
+  busy: boolean;
+  onDone: () => void;
+}) {
+  const { t } = useLang();
+  const [taggerId, setTaggerId] = useState('');
+  const [taggedId, setTaggedId] = useState('');
+  const [tagTime, setTagTime] = useState('');
+  const [note, setNote] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [submitBusy, setSubmitBusy] = useState(false);
+  const [duplicateWarn, setDuplicateWarn] = useState(false);
+
+  const activePlayers = snapshot.players.filter((p) => p.status === 'active');
+  const normalXp = 10;
+  const awardedXp = Math.round(normalXp * 0.5);
+
+  const handleCheckDuplicate = () => {
+    if (!taggerId || !taggedId) return;
+    const todayDate = snapshot.today?.date ?? new Date().toISOString().slice(0, 10);
+    const existing = (snapshot.allTags ?? []).some(
+      (tag) =>
+        tag.tagger_id === taggerId &&
+        tag.tagged_player_id === taggedId &&
+        tag.status === 'confirmed' &&
+        tag.daily_game_id === snapshot.today?.id,
+    );
+    setDuplicateWarn(existing);
+  };
+
+  const handleSubmit = async () => {
+    setSubmitBusy(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const timeIso = tagTime
+        ? new Date(`${new Date().toISOString().slice(0, 10)}T${tagTime}:00`).toISOString()
+        : undefined;
+      await manualTagApi.create(pin, taggerId, taggedId, timeIso, note || undefined);
+      setSuccess('Manual tag recorded!');
+      setTaggerId('');
+      setTaggedId('');
+      setTagTime('');
+      setNote('');
+      setConfirming(false);
+      setDuplicateWarn(false);
+      onDone();
+    } catch (e: any) {
+      if (e?.code === 'duplicate_tag') {
+        setError(t('admin.duplicateTagWarn'));
+      } else if (e?.code === 'tagger_not_active') {
+        setError('Tagger is not an active player.');
+      } else if (e?.code === 'tagged_not_active') {
+        setError('Tagged player is not active.');
+      } else {
+        setError('Could not record tag. Try again.');
+      }
+      setConfirming(false);
+    } finally {
+      setSubmitBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-ink-500">{t('admin.manualTagDesc')}</p>
+
+      <div>
+        <label className="text-xs font-semibold uppercase tracking-wider text-ink-400">{t('admin.tagger')}</label>
+        <select value={taggerId} onChange={(e) => { setTaggerId(e.target.value); setConfirming(false); handleCheckDuplicate(); }}
+          className="mt-1.5 w-full rounded-lg border border-ink-600 bg-ink-900 px-3 py-2.5 text-sm text-white outline-none focus:border-blue-500">
+          <option value="">— Select —</option>
+          {activePlayers.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label className="text-xs font-semibold uppercase tracking-wider text-ink-400">{t('admin.taggedPlayer')}</label>
+        <select value={taggedId} onChange={(e) => { setTaggedId(e.target.value); setConfirming(false); handleCheckDuplicate(); }}
+          className="mt-1.5 w-full rounded-lg border border-ink-600 bg-ink-900 px-3 py-2.5 text-sm text-white outline-none focus:border-blue-500">
+          <option value="">— Select —</option>
+          {activePlayers.filter((p) => p.id !== taggerId).map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label className="text-xs font-semibold uppercase tracking-wider text-ink-400">{t('admin.tagTime')}</label>
+        <input type="time" value={tagTime} onChange={(e) => setTagTime(e.target.value)}
+          className="mt-1.5 w-full rounded-lg border border-ink-600 bg-ink-900 px-3 py-2.5 text-sm text-white outline-none focus:border-blue-500" />
+      </div>
+
+      <div>
+        <label className="text-xs font-semibold uppercase tracking-wider text-ink-400">{t('admin.tagNote')}</label>
+        <input value={note} onChange={(e) => setNote(e.target.value)}
+          placeholder={t('admin.tagNote')}
+          className="mt-1.5 w-full rounded-lg border border-ink-600 bg-ink-900 px-3 py-2 text-sm text-white outline-none focus:border-blue-500" />
+      </div>
+
+      {duplicateWarn && (
+        <div className="rounded-xl border border-pending/40 bg-pending/10 px-3 py-2.5 text-xs text-pending-bright">
+          {t('admin.duplicateTagWarn')}
+        </div>
+      )}
+
+      {error && <p className="text-sm text-it-bright">{error}</p>}
+      {success && <p className="text-sm text-safe-bright">{success}</p>}
+
+      {confirming ? (
+        <div className="rounded-xl border-2 border-blue-500/50 bg-blue-500/10 p-4 text-center">
+          <p className="text-sm text-white">
+            {playerById(snapshot, taggerId)?.name} → {playerById(snapshot, taggedId)?.name}
+          </p>
+          {tagTime && <p className="text-xs text-ink-400">{t('admin.tagTime')}: {tagTime}</p>}
+          <div className="mt-3 space-y-1 rounded-lg bg-ink-900 p-3 text-xs">
+            <p className="text-ink-400">{t('admin.normalXp')}: <span className="font-bold text-white">+{normalXp}</span></p>
+            <p className="text-it-bright">{t('admin.latePenalty')}: <span className="font-bold">-50%</span></p>
+            <p className="text-safe-bright">{t('admin.xpAwarded')}: <span className="font-bold">+{awardedXp}</span></p>
+          </div>
+          <div className="mt-4 flex gap-3">
+            <button onClick={() => setConfirming(false)} disabled={submitBusy}
+              className="flex-1 rounded-xl border border-ink-600 py-2.5 font-semibold text-ink-200 active:scale-95 disabled:opacity-50">
+              {t('common.cancel')}
+            </button>
+            <button onClick={handleSubmit} disabled={submitBusy}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-500 py-2.5 font-bold text-white active:scale-95 disabled:opacity-50">
+              {submitBusy ? 'Saving…' : t('common.confirm')}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => { handleCheckDuplicate(); setConfirming(true); }}
+          disabled={busy || !taggerId || !taggedId}
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-500 py-2.5 text-sm font-bold text-white active:scale-95 disabled:opacity-50">
+          <Hand className="h-4 w-4" /> {t('admin.confirmManualTag')}
+        </button>
+      )}
     </div>
   );
 }
